@@ -4,21 +4,35 @@ namespace SpaceShooter.GameObjects
 {
     internal class Asteroid : GameObject
     {
-        public Asteroid(Form form, Point position, float speed, float rotationAngle, Sprite sprite, bool visible = true) : base(form, position, speed, rotationAngle, sprite, visible)
+
+        public float InitialSpeed {  get; private set; }
+        public float TimeInactive { get; set; } = 0f;
+
+        public Asteroid(Form form, Point position, float speed, float heading, Sprite sprite, bool visible = true)
+            : base(form, position, speed, heading, sprite, visible)
         {
+            InitialSpeed = speed;
         }
 
-        public Asteroid(Form form, Point position, Sprite sprite, float speed = 0, float rotationAngle = 0, bool isVisible = true) : base(form, position, sprite, speed, rotationAngle, isVisible)
+        public Asteroid(Form form, Point position, Sprite sprite, float speed = 0, float heading = 0, bool isVisible = true)
+            : base(form, position, sprite, speed, heading, isVisible)
         {
+            InitialSpeed = speed;
         }
 
-        public void MoveOffScreen()
+        public void Reset()
+        {
+            TimeInactive = 0f;
+            Speed = InitialSpeed;
+        }
+
+        public void SpawnOffScreen()
         {
             Random rand = new Random();
             int side = rand.Next(4);
 
-            Rectangle screenBounds = form.ClientRectangle;
-            int ObjectSize = Sprite.Texture.Width * 2;
+            Rectangle screenBounds = _parentForm.ClientRectangle;
+            int ObjectSize = Sprite.Texture.Width;
 
             float x = 0, y = 0;
             switch (side)
@@ -46,8 +60,8 @@ namespace SpaceShooter.GameObjects
 
         public void RotateTowardsInBounds()
         {
-            float angleToTarget = AngleToTarget(RandomPositionInBounds(form.ClientRectangle));
-            RotationAngle = angleToTarget;
+            float angleToTarget = AngleToTarget(RandomPositionInBounds(_parentForm.ClientRectangle));
+            Heading = angleToTarget;
         }
 
         private Point RandomPositionInBounds(Rectangle rect, float areaPercentage = 0.3f)
@@ -66,6 +80,27 @@ namespace SpaceShooter.GameObjects
             return new Point(x, y);
         }
 
+        public void ApplyDeviation(GameObject target)
+        {
+            float minimumSpeed = 5f;
+            float angleDiff = Math.Abs(Heading- target.Heading);
 
+            if (angleDiff < 100) 
+            {
+                Speed += 5f;
+                return;
+            }
+
+            // Slowing down target
+            if ( Speed > minimumSpeed)
+            {
+                Speed -= 0.1f;
+            }
+            // Changing its direction
+            else
+            {
+                Heading = target.Heading;
+            }
+        }
     }
 }

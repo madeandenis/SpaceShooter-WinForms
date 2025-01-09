@@ -4,31 +4,31 @@ namespace SpaceShooter.GameObjects
 {
     internal class GameObject
     {
-        protected readonly Form form;
+        protected readonly Form _parentForm;
         protected Point _position;
         protected float _speed;
-        protected float _rotationAngle;
+        protected float _heading;
         protected Sprite _sprite;
         protected Boolean _visible;
 
-        public GameObject(Form form, Point position, float speed, float rotationAngle, Sprite sprite, Boolean visible = true)
+        public GameObject(Form parentForm, Point position, float speed, float heading, Sprite sprite, Boolean visible = true)
         {
-            this.form = form;   
+            _parentForm = parentForm;   
             Position = position;
             Speed = speed;
-            RotationAngle = rotationAngle;
+            Heading = heading;
             Sprite = sprite;
             Visible = visible;
         }
 
-        public GameObject(Form form, Point position, Sprite sprite, float speed = 0f, float rotationAngle = 0f, bool isVisible = true)
+        public GameObject(Form parentForm, Point position, Sprite sprite, float speed = 0f, float heading = 0f, bool isVisible = true)
         {
-            this.form = form;
-            this.Position = position;
-            this.Speed = speed;
-            this.RotationAngle = rotationAngle;
-            this.Sprite = sprite;
-            this.Visible = isVisible;
+            _parentForm = parentForm;
+            Position = position;
+            Speed = speed;
+            Heading = heading;
+            Sprite = sprite;
+            Visible = isVisible;
         }
 
         public Point Position
@@ -40,17 +40,13 @@ namespace SpaceShooter.GameObjects
         public float Speed
         {
             get { return _speed; }
-            set { _speed = TransformUtil.AdaptSpeed(value, form); }
+            set { _speed = TransformUtil.SpeedTransform.Adapt(value, _parentForm); }
         }
 
-        public float RotationAngle
+        public float Heading
         {
-            get { return _rotationAngle; }
-            set
-            {
-                _rotationAngle = value % 360; 
-                if (_rotationAngle < 0) _rotationAngle += 360; 
-            }
+            get { return _heading; }
+            set => _heading = value % 360; 
         }
         public Sprite Sprite { 
             get { return _sprite; }
@@ -63,19 +59,18 @@ namespace SpaceShooter.GameObjects
             set { _visible = value; }
         }
 
-        public void MatchTransform(GameObject obj, int offsetX = 0, int offsetY = 0)
+        public void MatchTransform(GameObject obj)
         {
-            Position = new Point(obj.Position.X + offsetX, obj.Position.Y + offsetY);
-            RotationAngle = obj.RotationAngle;
-            Sprite.RotationAngle = RotationAngle;
+            Position = new Point(obj.Position.X, obj.Position.Y);
+            Heading = obj.Heading;
+            Sprite.Angle = Heading;
         }
-
 
         public virtual void Render(PaintEventArgs e)
         {
             if (Visible)
             {
-                e.Graphics.DrawImage(TransformUtil.RotateImage(Sprite.Texture, Sprite.RotationAngle), Position);
+                e.Graphics.DrawImage(TransformUtil.ImageTransform.Rotate(Sprite.Texture, Sprite.Angle), Position);
             }
         }
 
@@ -97,7 +92,7 @@ namespace SpaceShooter.GameObjects
 
         public virtual void MoveInOrientation()
         {
-            double radians = RotationAngle * (Math.PI / 180); 
+            double radians = Heading * (Math.PI / 180); 
 
             // Calculate the direction vector 
             float directionX = (float)Math.Cos(radians);  // X component (horizontal)
@@ -116,8 +111,8 @@ namespace SpaceShooter.GameObjects
         public virtual void RotateTowardsTarget(Point targetPosition)
         {
             float angleToTarget = AngleToTarget(targetPosition);
-            RotationAngle = angleToTarget;
-            Sprite.RotationAngle = angleToTarget;
+            Heading = angleToTarget;
+            Sprite.Angle = angleToTarget;
         }
         
         public virtual float AngleToTarget(Point targetPosition)
@@ -134,13 +129,59 @@ namespace SpaceShooter.GameObjects
         public virtual bool IsOutsideOfBounds(int offset = 0)
         {
             Rectangle bounds = new Rectangle(
-                form.ClientRectangle.X - offset,
-                form.ClientRectangle.Y - offset,
-                form.ClientRectangle.Width + (2 * offset),
-                form.ClientRectangle.Height + (2 * offset)    
+                _parentForm.ClientRectangle.X - offset,
+                _parentForm.ClientRectangle.Y - offset,
+                _parentForm.ClientRectangle.Width + (2 * offset),
+                _parentForm.ClientRectangle.Height + (2 * offset)    
             );
 
             return !bounds.Contains(Position);
+        }
+
+        public enum CollisionShape
+        {
+            Rectangle, 
+            Circle,    
+        }
+
+        public virtual bool Intersects(GameObject target, CollisionShape collisionShape = CollisionShape.Circle, int padding = 0)
+        {
+            switch (collisionShape)
+            {
+                case CollisionShape.Rectangle:
+                    return InptersectsWithRectangle(target,padding);
+
+                case CollisionShape.Circle:
+                    return IntersectsWithCircle(target,padding);
+
+                default:
+                    throw new NotImplementedException($"Collision shape {collisionShape} not implemented.");
+            }
+        }
+        
+        private bool InptersectsWithRectangle(GameObject target, int padding)
+        {
+            Rectangle thisBox = new Rectangle(
+                Position,
+                new Size(Sprite.Texture.Width + padding, Sprite.Texture.Height + padding)
+            );
+
+            Rectangle targetBox = new Rectangle(
+                target.Position,
+                new Size(target.Sprite.Texture.Width, target.Sprite.Texture.Height)
+            );
+
+            return thisBox.IntersectsWith(targetBox);
+        }
+
+        private bool IntersectsWithCircle(GameObject target, int padding)
+        {
+            float distanceX = Position.X - target.Position.X;
+            float distanceY = Position.Y - target.Position.Y;
+            float distance = (float)Math.Sqrt(distanceX * distanceX + distanceY * distanceY);
+
+            float radiusSum = (Sprite.Texture.Width / 2) + (target.Sprite.Texture.Width / 2) + padding;
+            return distance < radiusSum;
         }
 
         public void MoveToCursor(MouseEventArgs e)
