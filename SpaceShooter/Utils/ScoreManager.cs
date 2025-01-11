@@ -4,103 +4,62 @@ namespace SpaceShooter.Utils
 {
     internal class ScoreManager
     {
-        private string filePath;
+        private readonly string filePath;
 
-        public ScoreManager() 
+        public ScoreManager()
         {
-            string subPath = $"..\\..\\..\\UserData\\score.json";
+            string subPath = $"..\\..\\..\\UserData\\highscore.json";
             filePath = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), subPath);
         }
 
-        public void SaveScores(int highscore, int lastScore)
+        public int LoadHighscore()
         {
             try
             {
-                var scores = new Dictionary<string, int>
+                if (!File.Exists(filePath))
                 {
-                    { "highscore", highscore },
-                    { "lastScore", lastScore }
-                };
+                    SaveHighscore(0); 
+                }
 
-                string jsonString = JsonSerializer.Serialize(scores);
-                File.WriteAllText(this.filePath, jsonString);
+                File.SetAttributes(filePath, FileAttributes.ReadOnly); 
+                string jsonString = File.ReadAllText(filePath);
+                var data = JsonSerializer.Deserialize<Dictionary<string, int>>(jsonString);
+
+                return data != null && data.ContainsKey("highscore") ? data["highscore"] : 0;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error saving scores: {ex.Message}");
+                Console.WriteLine($"Error loading highscore: {ex.Message}");
+                return 0;
             }
         }
 
-        public Dictionary<string, int> LoadScores()
+        public void SaveHighscore(int highscore)
         {
             try
             {
-                var defaultScores = new Dictionary<string, int>
-                    {
-                        { "highscore", 0 },
-                        { "lastScore", 0 }
-                    };
-
                 if (File.Exists(filePath))
                 {
-                    string jsonString = File.ReadAllText(filePath);
-                    var scores = JsonSerializer.Deserialize<Dictionary<string, int>>(jsonString)
-                                 ?? new Dictionary<string, int>(); ;
-
-                    foreach (var key in defaultScores.Keys)
-                    {
-                        if (!scores.ContainsKey(key))
-                        {
-                            scores[key] = defaultScores[key];
-                        }
-                    }
-
-                    jsonString = JsonSerializer.Serialize(scores);
-                    File.WriteAllText(filePath, jsonString);
-
-                    return scores;
+                    File.SetAttributes(filePath, FileAttributes.Normal);
                 }
-                else
-                {
-                    string jsonString = JsonSerializer.Serialize(defaultScores);
-                    File.WriteAllText(filePath, jsonString);
-                    return defaultScores;
-                }
+
+                string jsonString = JsonSerializer.Serialize(new { highscore });
+                File.WriteAllText(filePath, jsonString);
+
+                File.SetAttributes(filePath, FileAttributes.ReadOnly); // Set back to read-only
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error loading scores: {ex.Message}");
-                return new Dictionary<string, int>(); 
+                Console.WriteLine($"Error saving highscore: {ex.Message}");
             }
         }
 
         public void UpdateHighscore(int newHighscore)
         {
-            try
+            int currentHighscore = LoadHighscore();
+            if (newHighscore > currentHighscore)
             {
-                var scores = LoadScores(); 
-                scores["highscore"] = newHighscore; 
-
-                SaveScores(scores["highscore"], scores["lastScore"]);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating highscore: {ex.Message}");
-            }
-        }
-
-        public void UpdateLastScore(int newLastScore)
-        {
-            try
-            {
-                var scores = LoadScores(); 
-                scores["lastScore"] = newLastScore; 
-
-                SaveScores(scores["highscore"], scores["lastScore"]);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating last score: {ex.Message}");
+                SaveHighscore(newHighscore);
             }
         }
     }

@@ -82,19 +82,19 @@ namespace SpaceShooter.GameObjects
 
         public void ApplyDeviation(GameObject target)
         {
-            float minimumSpeed = 5f;
+            float minimumSpeed = 8f;
             float angleDiff = Math.Abs(Heading- target.Heading);
 
             if (angleDiff < 100) 
             {
-                Speed += 5f;
+                Speed += 8f;
                 return;
             }
 
             // Slowing down target
             if ( Speed > minimumSpeed)
             {
-                Speed -= 0.1f;
+                Speed -= 0.05f;
             }
             // Changing its direction
             else

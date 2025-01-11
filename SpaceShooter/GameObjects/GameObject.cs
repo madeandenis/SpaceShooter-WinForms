@@ -59,9 +59,9 @@ namespace SpaceShooter.GameObjects
             set { _visible = value; }
         }
 
-        public void MatchTransform(GameObject obj)
+        public void MatchTransform(GameObject obj, int offsetX = 0, int offsetY = 0)
         {
-            Position = new Point(obj.Position.X, obj.Position.Y);
+            Position = new Point(obj.Position.X + offsetX, obj.Position.Y + offsetY);
             Heading = obj.Heading;
             Sprite.Angle = Heading;
         }
