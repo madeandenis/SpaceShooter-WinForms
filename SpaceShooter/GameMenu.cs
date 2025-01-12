@@ -1,10 +1,14 @@
-﻿using SpaceShooter.GameConfig;
+﻿using SpaceShooter.DataAccess.Remote;
+using SpaceShooter.GameConfig;
+using SpaceShooter.User;
 using SpaceShooter.Utils;
 
 namespace SpaceShooter
 {
     public partial class GameMenu : Form
     {
+        UserData User;
+
         GameDifficulty GameDifficulty { get; set; }
         private string[] difficulties;
         private int difficultyIndex;
@@ -13,8 +17,10 @@ namespace SpaceShooter
         private TableLayoutPanel menuPanel;
         private int buttonHeight;
 
-        public GameMenu(GameDifficulty gameDifficulty)
+        public GameMenu(GameDifficulty gameDifficulty, UserData user)
         {
+            User = user;
+
             GameDifficulty = gameDifficulty;
             difficulties = Enum.GetNames(typeof(Difficulty));
             difficultyIndex = Array.IndexOf(difficulties, gameDifficulty.Difficulty.ToString());  
@@ -27,14 +33,15 @@ namespace SpaceShooter
         {
             if (e.KeyCode == Keys.Escape)
             {
-                Close();
+                ResumeGame(sender, e);
             }
         }
+
 
         private void GameMenu_Load(object sender, EventArgs e)
         {
             FormBorderStyle = FormBorderStyle.None;
-            this.BackColor = Color.Black;
+            BackColor = Color.Black;
             ShowInTaskbar = false;
             TopMost = true;
 
@@ -87,7 +94,14 @@ namespace SpaceShooter
 
         private void ShowLeaderboard(object sender, EventArgs e)
         {
-            MessageBox.Show("Leaderboard feature coming soon!", "Leaderboard", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Form leaderboardForm = new Leaderboard();
+            leaderboardForm.ShowDialog();
+        }
+
+        private void LogOut(object sender, EventArgs e)
+        {
+            User.Name = "";
+            ResumeGame(sender, e);
         }
 
         private void QuitGame(object sender, EventArgs e)
@@ -97,7 +111,7 @@ namespace SpaceShooter
 
         private void InitializeLayout()
         {
-            buttonHeight = Height / 7;
+            buttonHeight = Height / 8;
 
             menuPanel = new TableLayoutPanel
             {
@@ -147,6 +161,10 @@ namespace SpaceShooter
             // Leaderboard Button
             Button leaderboardButton = CreateButton("Leaderboard", ShowLeaderboard);
             menuPanel.Controls.Add(leaderboardButton);
+
+            // Log Out Button
+            Button logOutButton = CreateButton("Log Out", LogOut);
+            menuPanel.Controls.Add(logOutButton);
 
             // Quit Button
             Button quitButton = CreateButton("Quit", QuitGame);

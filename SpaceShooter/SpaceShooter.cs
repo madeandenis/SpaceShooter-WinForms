@@ -1,6 +1,10 @@
+using SpaceShooter.DataAccess.Local;
+using SpaceShooter.DataAccess.Remote;
 using SpaceShooter.GameConfig;
 using SpaceShooter.GameObjects;
+using SpaceShooter.User;
 using SpaceShooter.Utils;
+using System.ComponentModel;
 using System.Media;
 using Timer = System.Windows.Forms.Timer;
 
@@ -9,27 +13,32 @@ namespace SpaceShooter
     public partial class SpaceShooter : Form
     {
         // Settings
-        private bool isPaused = false; 
+        private bool IsPaused = false;
+        private bool IsOver = false;
         private int FPS = 60;
-        private int scoreIncrementRate = 200;
+        private int ScoreIncrementRate = 200;
         GameDifficulty gameDifficulty;
 
+        // User Data
+        private UserData User;
+
+        // Session
+        private SessionManager sessionManager;
+
         // Timers - GameLoop
-        private Timer gameTimer;
+        private Timer GameTimer;
 
         // Shooting delay
-        private bool canShoot = true; 
-        private Timer shootDelayTimer;
-        private int shootDelayMs = 100;
+        private bool CanShoot = true;
+        private Timer ShootDelayTimer;
+        private int ShootDelayMs = 100;
 
         // Asteroid Spawning
-        private Timer asteroidSpawnTimer;
+        private Timer AsteroidSpawnTimer;
 
         // Scoring
-        private int Score;
-        private int HiScore;
-        private Timer scoreIncrementTimer;
         private ScoreManager scoreManager;
+        private Timer scoreIncrementTimer;
 
         // Assets
         private SoundPlayer LaserSound;
@@ -52,7 +61,12 @@ namespace SpaceShooter
         private GameObjectPool<GameObject> LaserBeamsPool;
         private GameObjectPool<Asteroid> AsteroidsPool;
 
-        // Speed
+        // Player 
+        private int PlayerHealth;
+
+        private DateTime lastHitTime = DateTime.MinValue;
+        private int collisionDelayMs = 1000;
+
         private float _playerSpeed;
         private float _laserBeamSpeed;
         private float PlayerSpeed
@@ -72,30 +86,37 @@ namespace SpaceShooter
             }
         }
 
-        // Player Health
-        private int PlayerHealth = 3; 
-
         // Debugging
         private Boolean DebugMode = true;
-        
+
+        // Components
+        Rectangle restartButtonRectangle;
+
         public SpaceShooter()
         {
-            Cursor.Hide();
             this.DoubleBuffered = true; // Drawing happens off-screen (buffer) then copied 
 
             InitializeComponent(); // Auto-generated WinForms method
+
+            InitializeUser();
 
             InitializeDifficulty(Difficulty.Easy);
 
             InitializeAssets();
             InitializeGameObjects();
-            
-            InitializeScore();
-            InitializeScoreIncrementTimer();
 
-            InitializeGameTimer();
-            InitializeShootDelayTimer();
-            InitializeAsteroidSpawnerTimer();
+            InitializeTimers();
+
+            Cursor.Hide();
+        }
+
+        public void InitializeUser()
+        {
+            string lastLoggedUser = new UserHistoryService().GetLastLoggedInUser();
+            User = new UserData(lastLoggedUser);
+
+            scoreManager = new ScoreManager(User);
+            sessionManager = new SessionManager(User);
         }
 
         public void InitializeDifficulty(Difficulty difficulty)
@@ -104,21 +125,23 @@ namespace SpaceShooter
             PlayerHealth = gameDifficulty.PlayerHealth;
         }
 
-        private void InitializeScore()
+
+        private void InitializeTimers()
         {
-            scoreManager = new ScoreManager();
-            HiScore = scoreManager.LoadHighscore();
+            InitializeGameTimer();
+            InitializeScoreIncrementTimer();
+            InitializeShootDelayTimer();
+            InitializeAsteroidSpawnerTimer();
         }
+
 
         private void InitializeScoreIncrementTimer()
         {
             scoreIncrementTimer = new Timer();
-            scoreIncrementTimer.Interval = scoreIncrementRate; 
+            scoreIncrementTimer.Interval = ScoreIncrementRate;
             scoreIncrementTimer.Tick += (s, e) =>
             {
-                Score += 10;
-                if(Score > HiScore) 
-                    HiScore = Score;
+                scoreManager.IncrementScore(10);
             };
             scoreIncrementTimer.Start();
         }
@@ -126,36 +149,36 @@ namespace SpaceShooter
 
         private void InitializeGameTimer()
         {
-            gameTimer = new Timer();
-            gameTimer.Interval = 1000 / FPS;
-            gameTimer.Tick += GameLoop;
-            gameTimer.Start();
+            GameTimer = new Timer();
+            GameTimer.Interval = 1000 / FPS;
+            GameTimer.Tick += GameLoop;
+            GameTimer.Start();
         }
 
         private void InitializeShootDelayTimer()
         {
-            shootDelayTimer = new Timer();
-            shootDelayTimer.Interval = shootDelayMs;
-            shootDelayTimer.Tick += (s, e) =>
+            ShootDelayTimer = new Timer();
+            ShootDelayTimer.Interval = ShootDelayMs;
+            ShootDelayTimer.Tick += (s, e) =>
             {
-                canShoot = true;
-                shootDelayTimer.Stop();
+                CanShoot = true;
+                ShootDelayTimer.Stop();
             };
         }
 
         private void InitializeAsteroidSpawnerTimer()
         {
-            asteroidSpawnTimer = new Timer();
-            asteroidSpawnTimer.Interval = gameDifficulty.AsteroidSpawnRate;
-            asteroidSpawnTimer.Tick += (s, e) =>
+            AsteroidSpawnTimer = new Timer();
+            AsteroidSpawnTimer.Interval = gameDifficulty.AsteroidSpawnRate;
+            AsteroidSpawnTimer.Tick += (s, e) =>
             {
                 SpawnAsteroids();
             };
-            asteroidSpawnTimer.Start();
+            AsteroidSpawnTimer.Start();
         }
         private void UpdateAsteroidSpawnRate()
         {
-            asteroidSpawnTimer.Interval = gameDifficulty.AsteroidSpawnRate;
+            AsteroidSpawnTimer.Interval = gameDifficulty.AsteroidSpawnRate;
         }
 
         private void InitializeAssets()
@@ -175,9 +198,9 @@ namespace SpaceShooter
             PlayerSpeed = 40;
             LaserBeamSpeed = 100;
 
-            Spaceship    = new GameObject(this, screenCenter, ShipSprite, PlayerSpeed);
+            Spaceship = new GameObject(this, screenCenter, ShipSprite, PlayerSpeed);
             TargetCursor = new GameObject(this, screenCenter, TargetCursorSprite);
-            
+
             LaserBeamFactory = () => new GameObject(this, screenCenter, LaserBeamSprite, LaserBeamSpeed);
             AsteroidFactory = () =>
             {
@@ -209,7 +232,7 @@ namespace SpaceShooter
             UpdateActiveAsteroids();
 
             CheckGroupCollision(ActiveLaserBeams, ActiveAsteroids, handleLaserAsteroidCollision);
-            CheckGroupCollision(new List<GameObject> { Spaceship }, ActiveAsteroids, (s,a) => { PlayerHealth--; });
+            CheckGroupCollision(new List<GameObject> { Spaceship }, ActiveAsteroids, handleSpaceshipAsteroidCollision);
 
             this.Invalidate(); // Trigger a repaint
         }
@@ -221,38 +244,52 @@ namespace SpaceShooter
             TargetCursor.MoveToCursor(e);
             Spaceship.RotateTowardsTarget(TargetCursor.Position);
         }
+        private void SpaceShooter_MouseClick(object sender, MouseEventArgs e)
+        {
+            if (IsOver && restartButtonRectangle.Contains(e.Location))
+            {
+                RestartGame();
+            }
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
 
-            TargetCursor.Render(e);
-            Spaceship.Render(e);
-            
-            RenderGameObjects(ActiveLaserBeams, e);
-            RenderGameObjects(ActiveAsteroids, e);
+            if (!IsOver)
+            {
+                TargetCursor.Render(e);
+                Spaceship.Render(e);
 
-            RenderLives(e);
+                RenderGameObjects(ActiveLaserBeams, e);
+                RenderGameObjects(ActiveAsteroids, e);
 
-            PrintScore(e);
-            if(DebugMode) PrintDebugInfo(e);
+                RenderLives(e);
+
+                PrintScore(e);
+            }
+            else
+            {
+                RenderGameOver(e);
+            }
+            if (DebugMode) PrintDebugInfo(e);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
 
-            scoreManager.UpdateHighscore(HiScore);
+            scoreManager.SaveHiScore();
         }
 
 
         private void SpaceShooter_KeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Space && canShoot)
+            if (e.KeyCode == Keys.Space && CanShoot)
             {
-                canShoot = false;        
-                SpawnLaserBeam();         
-                shootDelayTimer.Start(); 
+                CanShoot = false;
+                SpawnLaserBeam();
+                ShootDelayTimer.Start();
             }
             else if (e.KeyCode == Keys.Escape)
             {
@@ -260,52 +297,98 @@ namespace SpaceShooter
             }
         }
 
-        private void TogglePauseGame()
+        private async void TogglePauseGame()
         {
-            if (isPaused)
+            UpdateAsteroidSpawnRate();
+
+            if (IsPaused)
             {
-                gameTimer.Start();
-                asteroidSpawnTimer.Start();
-                scoreIncrementTimer.Start();
-                isPaused = false;
+                ResumeGame();
             }
             else
             {
-                gameTimer.Stop();
-                asteroidSpawnTimer.Stop();
-                scoreIncrementTimer.Stop();
-                isPaused = true;
-                
-                Cursor.Show();
-
-                GameMenu pauseMenu = new GameMenu(gameDifficulty);
-                pauseMenu.ShowDialog(this);
-
-                UpdateAsteroidSpawnRate();
-
-                Cursor.Hide();
-                TogglePauseGame();
+                PauseGame();
             }
 
-            this.Invalidate(); 
+            this.Invalidate();
         }
+
+        private void ResumeGame()
+        {
+            GameTimer.Start();
+            AsteroidSpawnTimer.Start();
+            scoreIncrementTimer.Start();
+            IsPaused = false;
+        }
+
+        private void PauseGame()
+        {
+            GameTimer.Stop();
+            AsteroidSpawnTimer.Stop();
+            scoreIncrementTimer.Stop();
+            IsPaused = true;
+
+            scoreManager.SaveHiScore();
+
+            ShowPauseMenu();
+            TogglePauseGame();
+        }
+        private void StopGame()
+        {
+            GameTimer.Stop();
+            AsteroidSpawnTimer.Stop();
+            scoreIncrementTimer.Stop();
+
+            scoreManager.SaveHiScore();
+
+            IsOver = true;
+
+            Cursor.Show();
+        }
+
+        private void RestartGame()
+        {
+            PlayerHealth = gameDifficulty.PlayerHealth;
+            scoreManager.CurrentScore = 0;
+
+            ActiveAsteroids.Clear();
+            ActiveLaserBeams.Clear();
+
+            GameTimer.Start();
+            AsteroidSpawnTimer.Start();
+            scoreIncrementTimer.Start();
+
+            IsPaused = false;
+            IsOver = false;
+        }
+
+        private void ShowPauseMenu()
+        {
+            Cursor.Show();
+
+            GameMenu pauseMenu = new GameMenu(gameDifficulty, User);
+            pauseMenu.ShowDialog(this);
+
+            Cursor.Hide();
+        }
+
 
         private void SpawnLaserBeam()
         {
             LaserSound.Play();
             GameObject laserBeam = LaserBeamsPool.Get();
             laserBeam.MatchTransform(
-                Spaceship, 
+                Spaceship,
                 Spaceship.Sprite.Texture.Width / 2,
-                +Spaceship.Sprite.Texture.Height / 2 
+                +Spaceship.Sprite.Texture.Height / 2
             );
             ActiveLaserBeams.Add(laserBeam);
         }
 
         private void SpawnAsteroids()
         {
-            if (ActiveAsteroids.Count < gameDifficulty.MaxAsteroids) 
-            { 
+            if (ActiveAsteroids.Count < gameDifficulty.MaxAsteroids)
+            {
                 Asteroid asteroid = AsteroidsPool.Get();
                 asteroid.SpawnOffScreen();
                 asteroid.RotateTowardsInBounds();
@@ -324,7 +407,7 @@ namespace SpaceShooter
                 {
                     obj.TimeInactive++;
 
-                    if (obj.TimeInactive > 0.5 * FPS) 
+                    if (obj.TimeInactive > 0.5 * FPS)
                     {
                         obj.TimeInactive = 0;
                         ActiveAsteroids.RemoveAt(i);
@@ -369,7 +452,7 @@ namespace SpaceShooter
 
                 for (int j = group2.Count - 1; j >= 0; j--)
                 {
-                    if (j >= group2.Count) continue; 
+                    if (j >= group2.Count) continue;
                     T2 obj2 = group2[j];
 
                     collisionHandler(obj1, obj2);
@@ -390,6 +473,28 @@ namespace SpaceShooter
             }
         }
 
+        private void handleSpaceshipAsteroidCollision(GameObject obj1, GameObject obj2)
+        {
+            if (obj1 is not GameObject spaceship || obj2 is not Asteroid asteroid)
+                return;
+
+            if (spaceship.Intersects(asteroid)
+                && DateTime.Now - lastHitTime > TimeSpan.FromMilliseconds(collisionDelayMs))
+            {
+                PlayerHealth--;
+
+                asteroid.ApplyDeviation(spaceship);
+
+                lastHitTime = DateTime.Now;
+
+                if (PlayerHealth <= 0)
+                {
+                    StopGame();
+                }
+
+            }
+        }
+
         private void RenderGameObjects<T>(List<T> gameObjects, PaintEventArgs e) where T : GameObject
         {
             foreach (var gameObject in gameObjects)
@@ -403,8 +508,8 @@ namespace SpaceShooter
             int paddingX = 40;
             int paddingY = 100;
 
-            int startX = 
-                this.Bounds.Width / 2 
+            int startX =
+                this.Bounds.Width / 2
                 - ((ShipSprite.Texture.Width * PlayerHealth) + (paddingX * PlayerHealth)) / 2;
             int startY = this.Bounds.Top + paddingY;
 
@@ -414,9 +519,95 @@ namespace SpaceShooter
                 Point position = new Point(startX + i * (ShipSprite.Texture.Width + paddingX), 50);
 
                 GameObject health = new GameObject(this, position, shipSprite);
-                
+
                 health.Render(e);
             }
+        }
+
+        private void RenderGameOver(PaintEventArgs e)
+        {
+            Font gameOverFont = new Font(HiScoreFont, 100, FontStyle.Bold);
+            Brush brush = Brushes.Red;
+            string gameOverText = "GAME OVER";
+
+            SizeF textSize = e.Graphics.MeasureString(gameOverText, gameOverFont);
+
+            float x = (this.ClientSize.Width - textSize.Width) / 2;
+            float y = (this.ClientSize.Height - textSize.Height * 2) / 2;
+
+            e.Graphics.DrawString(gameOverText, gameOverFont, brush, x, y);
+
+            Font valueFont = new Font(HiScoreFont, 60);
+            Brush valueBrush = new SolidBrush(Color.FromArgb(180, 245, 17));
+
+            string ScoreText = "Your Score: " + scoreManager.CurrentScore;
+            SizeF ScoreTextSize = e.Graphics.MeasureString(ScoreText, valueFont);
+
+            float highScoreX = (this.ClientSize.Width - ScoreTextSize.Width) / 2;
+            float highScoreY = y + ScoreTextSize.Height + 40;
+
+            e.Graphics.DrawString(ScoreText, valueFont, valueBrush, highScoreX, highScoreY);
+
+            float restartButtonYPosition = highScoreY + ScoreTextSize.Height + 30;
+            DrawRestartButton(e, restartButtonYPosition);
+
+        }
+        private void DrawRestartButton(PaintEventArgs e, float yPosition)
+        {
+            int buttonWidth = 300;
+            int buttonHeight = 80;
+
+            int buttonX = (this.ClientSize.Width - buttonWidth) / 2;
+            int buttonY = (int)yPosition;
+
+            restartButtonRectangle = new Rectangle(buttonX, buttonY, buttonWidth, buttonHeight);
+
+            Brush buttonBrush = Brushes.Black;
+            e.Graphics.FillRectangle(buttonBrush, restartButtonRectangle);
+
+            Font buttonFont = new Font(HiScoreFont, 40);
+            Brush buttonTextBrush = Brushes.White;
+
+            string restartButtonText = "Restart";
+
+            SizeF buttonTextSize = e.Graphics.MeasureString(restartButtonText, buttonFont);
+            float buttonTextX = restartButtonRectangle.X + (restartButtonRectangle.Width - buttonTextSize.Width) / 2;
+            float buttonTextY = restartButtonRectangle.Y + (restartButtonRectangle.Height - buttonTextSize.Height) / 2;
+
+            e.Graphics.DrawString(restartButtonText, buttonFont, buttonTextBrush, buttonTextX, buttonTextY);
+        }
+
+
+        private void PrintScore(PaintEventArgs e)
+        {
+            Font labelFont = new Font(HiScoreFont, 30);
+            Font valueFont = new Font(HiScoreFont, 60);
+
+            Brush brush = new SolidBrush(Color.FromArgb(180, 245, 17));
+
+            float padding = this.Bounds.Width / 10;
+            float tilt = 2;
+
+            float X = this.Bounds.Left + padding;
+            float Y = this.Bounds.Bottom - padding;
+
+            DrawRotatedString(e, "POINTS", labelFont, brush, X, Y, tilt);
+
+            X -= labelFont.Size * FormatScore(scoreManager.CurrentScore).Length * 1.9f;
+            Y -= labelFont.Size * 2.2f;
+
+            DrawRotatedString(e, FormatScore(scoreManager.CurrentScore), valueFont, brush, X, Y, tilt);
+
+            X = this.Bounds.Right - padding * 2 - FormatScore(scoreManager.HiScore).Length * valueFont.Size;
+            Y = this.Bounds.Bottom - padding;
+
+            DrawRotatedString(e, FormatScore(scoreManager.HiScore), valueFont, brush, X, Y, -tilt);
+
+            Y -= valueFont.Size * 0.9f;
+            X += labelFont.Size * FormatScore(scoreManager.HiScore).Length * 1.7f;
+
+            DrawRotatedString(e, "HISCORE", labelFont, brush, X, Y, -tilt);
+
         }
 
         private void PrintDebugInfo(PaintEventArgs e)
@@ -426,8 +617,12 @@ namespace SpaceShooter
             int X = 10;
             int Y = 10;
 
+            string varString = $"Current user: {User.Name}";
+            e.Graphics.DrawString(varString, font, brush, X, Y);
+            Y += 25;
+
             // Active Laser Beams & Laser Beam Pool
-            string varString = $"Active Laser Beams: {ActiveLaserBeams.Count}";
+            varString = $"Active Laser Beams: {ActiveLaserBeams.Count}";
             e.Graphics.DrawString(varString, font, brush, X, Y);
             Y += 25;
             varString = $"Pool Laser Beams: {LaserBeamsPool.Count}";
@@ -456,12 +651,12 @@ namespace SpaceShooter
             varString = $"Difficulty: {gameDifficulty.Difficulty}";
             e.Graphics.DrawString(varString, font, brush, X, Y);
             Y += 25;
-            
+
             // Max Active Asteroids
             varString = $"Max Active Asteroids: {gameDifficulty.MaxAsteroids}";
             e.Graphics.DrawString(varString, font, brush, X, Y);
             Y += 25;
-            
+
             // Asteroids Range
             varString = $"Asteroid Size Range: {gameDifficulty.AsteroidSizeRange}";
             e.Graphics.DrawString(varString, font, brush, X, Y);
@@ -469,42 +664,9 @@ namespace SpaceShooter
             varString = $"Asteroid Speed Asteroids:  {gameDifficulty.AsteroidSpeedRange}";
             e.Graphics.DrawString(varString, font, brush, X, Y);
             Y += 25;
-            varString = $"Asteroid Spawn Rate:  {asteroidSpawnTimer.Interval}";
+            varString = $"Asteroid Spawn Rate:  {AsteroidSpawnTimer.Interval}";
             e.Graphics.DrawString(varString, font, brush, X, Y);
             Y += 25;
-        }
-
-
-        private void PrintScore(PaintEventArgs e)
-        {
-            Font labelFont = new Font(HiScoreFont, 30);
-            Font valueFont = new Font(HiScoreFont, 60);
-
-            Brush brush = new SolidBrush(Color.FromArgb(180, 245, 17)); 
-            
-            float padding = this.Bounds.Width / 10;
-            float tilt = 2;
-
-            float X = this.Bounds.Left + padding;
-            float Y = this.Bounds.Bottom - padding;
-
-            DrawRotatedString(e, "POINTS", labelFont, brush, X, Y, tilt);
-
-            X -= labelFont.Size * FormatScore(Score).Length * 1.9f;
-            Y -= labelFont.Size * 2.2f;
-
-            DrawRotatedString(e, FormatScore(Score), valueFont, brush, X, Y,tilt);
-
-            X = this.Bounds.Right - padding * 2 - FormatScore(HiScore).Length * valueFont.Size;
-            Y = this.Bounds.Bottom - padding;
-
-            DrawRotatedString(e, FormatScore(HiScore), valueFont, brush, X, Y, -tilt);
-
-            Y -= valueFont.Size * 0.9f;
-            X += labelFont.Size * FormatScore(Score).Length * 1.7f;
-
-            DrawRotatedString(e, "HISCORE", labelFont, brush, X, Y, -tilt);
-
         }
 
         private void DrawRotatedString(PaintEventArgs e, string text, Font font, Brush brush, float x, float y, float rotationAngle)
@@ -514,7 +676,7 @@ namespace SpaceShooter
 
             int defaultTextLength = text.IndexOf(' ');
             if (defaultTextLength == -1) defaultTextLength = text.Length;
-                
+
             e.Graphics.TranslateTransform(x + font.Size * defaultTextLength, y - font.Size / 2);
             e.Graphics.RotateTransform(rotationAngle);
 
@@ -527,6 +689,87 @@ namespace SpaceShooter
         {
             return score.ToString("00000000");
         }
+    }
+
+    internal class SessionManager
+    {
+        private readonly UserHistoryService userHistoryService;
+
+        private readonly UserData user;
+
+        public SessionManager(UserData user)
+        {
+            this.user = user;
+            this.userHistoryService = new UserHistoryService(); 
+
+            if (!string.IsNullOrEmpty(user.Name))
+            {
+                userHistoryService.AddUsername(user.Name);
+            }
+
+            user.PropertyChanged += User_PropertyChanged;
+        }
+
+        private void User_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(UserData.Name) && !string.IsNullOrEmpty(user.Name))
+            {
+                userHistoryService.AddUsername(user.Name);
+            }
+        }
+    }
+
+
+    internal class ScoreManager
+    {
+        private readonly LocalScoreService localScoreService;
+        private readonly RemoteScoreService remoteScoreService;
+        private readonly UserData user;
+
+        public int CurrentScore;
+        public int HiScore;
+
+        public ScoreManager(UserData user)
+        {
+            this.user = user;
+            localScoreService = new LocalScoreService();
+            remoteScoreService = new RemoteScoreService();
+
+            HiScore = localScoreService.LoadHighscore(user.Name); 
+
+            user.PropertyChanged += User_PropertyChanged;
+        }
+
+        private void User_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(UserData.Name) && !string.IsNullOrEmpty(user.Name))
+            {
+                UpdateScore();
+            }
+        }
+
+        private void UpdateScore()
+        {
+            HiScore = localScoreService.LoadHighscore(user.Name);
+            CurrentScore = 0;
+        }
+
+        public void SaveHiScore()
+        {
+            localScoreService.SaveHighscore(user.Name, HiScore);
+            remoteScoreService.SetScore("SpaceShooter", user.Name, HiScore);
+        }
+
+        public void IncrementScore(int increment)
+        {
+            CurrentScore += increment;
+
+            if (CurrentScore > HiScore)
+            {
+                HiScore = CurrentScore;
+            }
+        }
 
     }
+
 }

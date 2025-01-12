@@ -44,6 +44,7 @@
             Text = "SpaceShooter";
             WindowState = FormWindowState.Maximized;
             KeyDown += SpaceShooter_KeyDown;
+            MouseClick += SpaceShooter_MouseClick;
             ResumeLayout(false);
         }
 
