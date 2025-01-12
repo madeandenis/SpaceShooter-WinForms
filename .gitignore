@@ -361,3 +361,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/SpaceShooter/User/Data/highscore.json
+/SpaceShooter/User/Data/user_history.json
